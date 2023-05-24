@@ -56,7 +56,6 @@ def get_sp_todo(todo_id: int, user: dict = Depends(get_current_user), db: Sessio
 
 @router.get("/get/user/")
 def get_sp_todo_based_user(user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    print("user data:",user.get("user_name"))
     elements = db.query(models.Todo).filter(models.Todo.owner_id == user.get('user_id')).all()
     if elements:
         return elements
@@ -66,7 +65,6 @@ def get_sp_todo_based_user(user: dict = Depends(get_current_user), db: Session =
 @router.post("/post", status_code=status.HTTP_201_CREATED)
 def post_todo(todo_request: TodoRequest, user: dict = Depends(get_current_user), db: SessionLocal = Depends(get_db)):
     try:
-        print("user details from post todo:",user)
         if user is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
         todo_model = models.Todo(**todo_request.dict(), owner_id=user.get('user_id'))

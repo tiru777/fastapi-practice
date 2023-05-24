@@ -60,15 +60,12 @@ def create_access_token(user_name: str, user_id: int, user_role: str, expires_da
     return jwt.encode(encode, SECURITY_KEY, algorithm=ALGORITHM)
 
 
-async def get_current_user(request: Request, token: str = Depends(oauth2_bearer)): # token: str = Depends(oauth2_bearer
+async def get_current_user(request: Request):  # token: str = Depends(oauth2_bearer
     try:
         token = request.cookies.get("token")
         if token is None:
             return None
-        print("token is :",  token)
-        # token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJrcmlzaG5hMTIzIiwiaWQiOjksInJvbGUiOiJTU0UiLCJleHAiOjE2ODQ4OTM1MTN9.HWTe-TDryZsUl3yy9gWei7wjcOL1OzgCfjP6cjPsBW0"
         payload = jwt.decode(token, SECURITY_KEY, algorithms=[ALGORITHM])
-        print("jwt payload:", payload)
         user_name: str = payload.get('sub')
         user_id: int = payload.get('id')
         user_role: str = payload.get("role")
@@ -97,7 +94,6 @@ def create_user(create_user_request: CreateUser, db: Session = Depends(get_db_co
 @router.post("/token/user-validation")
 def login_for_access_token(response:Response,form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db_connection)):
     user = authenticate_user(form_data.username, form_data.password, db)
-    print("user from login:", user)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

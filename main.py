@@ -5,13 +5,18 @@ from Level_3_Advance_Fullstack_TodoApp import auth, todo_ui
 from database import engine
 import models
 from starlette.staticfiles import StaticFiles
-
+from starlette.responses import RedirectResponse
+from starlette import status
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Learning FastAPI")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+
+@app.get("/")
+async def home():
+    return RedirectResponse(url="/todo_ui/home", status_code=status.HTTP_302_FOUND)
 
 app.include_router(users.router)
 app.include_router(admin.router)

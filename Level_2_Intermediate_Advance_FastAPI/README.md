@@ -1,154 +1,195 @@
 # Level 2 — Intermediate & Advanced FastAPI
 
-This directory contains Level 2 exercises and examples for learning intermediate to advanced FastAPI concepts. The goal of Level 2 is to show how a production-like FastAPI service is organized and how requests flow through routers, dependencies, business logic, and persistence layers.
-
-> This README explains the working flow, core components, how to run the code locally, and recommended development practices.
+This README is tailored to the Level_2_Intermediate_Advance_FastAPI package in this repository. It explains the working flow and the concrete endpoints, models, and run instructions for the code present in this directory.
 
 ---
 
-## Goals
+## Quick summary
 
-- Demonstrate how to structure a larger FastAPI application using APIRouters and modular packages.
-- Show common production patterns: dependency injection, authentication (JWT/OAuth2), database integration (async or sync), migrations, background tasks, and testing.
-- Provide conventions for models (Pydantic schemas), database models (ORM), and service layers.
-
-## High-level architecture & request flow
-
-1. Client sends an HTTP request to an endpoint (e.g. `POST /auth/login`, `GET /items/`).
-2. The request is received by FastAPI server and matched to an APIRouter path.
-3. Path operation dependencies and global dependencies (authentication, DB session, rate limiting) are resolved.
-4. Request body is validated by Pydantic schemas (input models).
-5. The router calls an application-level service or controller function that contains business logic.
-6. The service uses repository/DAO functions to interact with the database (via an async engine like SQLAlchemy Async or a sync ORM) or external services (Redis, external APIs, message broker).
-7. The DB layer executes queries and returns domain models which are converted to Pydantic response schemas.
-8. Background tasks (if any) are scheduled, and the response is returned to the client.
-9. Event handlers (startup/shutdown) manage resources (DB pools, Redis connections, scheduler services).
-
-Flow diagram (textual):
-
-Client -> FastAPI -> APIRouter -> Dependencies (auth, DB) -> Service/Controller -> Repository/DAO -> Database/External
-
-Background & async tasks: Service -> BackgroundTask / Celery -> Worker -> External systems
+- Purpose: intermediate/advanced FastAPI learning exercises demonstrating routers, dependencies, simple auth (JWT in cookie), database models (SQLAlchemy), and CRUD operations for users and todos.
+- DB: SQLite by default (file: `todo.db`) configured in repository `database.py`.
+- Main app entrypoint: `main.py` — routers in this package are included by `main.py`.
+- API docs: http://127.0.0.1:8000/docs when running locally.
 
 ---
 
-## Typical project layout (convention)
+## Files in this package (what they do)
 
-- app/
-  - main.py                 # FastAPI application factory and app instance
-  - api/
-    - v1/
-      - routers/*.py        # APIRouter modules (auth, users, items, etc.)
-  - core/
-    - config.py             # Settings and environment handling (pydantic BaseSettings)
-    - security.py           # JWT helpers, password hashing
-  - db/
-    - session.py            # DB engine and session management
-    - base.py               # Base metadata for models
-    - migrations/           # Alembic configs (if present)
-  - models/                 # ORM models
-  - schemas/                # Pydantic request/response models
-  - services/               # Business logic / use-cases
-  - repositories/           # DB access logic
-  - dependencies.py         # Shared dependency functions (get_db, get_current_user)
-  - tasks/                  # Background tasks and Celery integration
-  - utils/                  # Helpers, validators, common utilities
-  - tests/                  # Unit and integration tests
+- auth_api.py — authentication endpoints, JWT creation/validation, create user, login (sets auth token in an HTTP-only cookie).
+- users.py — user-related endpoints (get current user details, list all users, update password).
+- todo.py — todo CRUD endpoints (create, read per-id, read per-user, update, delete).
+- admin.py — admin-only endpoints to list all todos and delete any todo (authorization based on `role` claim in token).
 
-This layout is flexible but the separation encourages clear responsibilities: routers only handle request/response, services contain business rules, repositories handle persistence.
+Other repository files used by this package:
+- models.py — SQLAlchemy models (User, Todo).
+- database.py — SQLAlchemy engine/session and Base.
+- main.py — FastAPI app factory and router registration.
 
 ---
 
-## Key components explained
+## Data models (DB schema)
 
-- APIRouter: registers paths and request validation. Keep routers thin — call services.
-- Dependencies: use FastAPI's dependency injection to provide DB sessions, authenticated users, and config.
-- Pydantic Schemas: use separate input (Create/Update) and output (Read) schemas to avoid leaking internal fields.
-- Services: implement transactional business logic; call repositories and other infra.
-- Repositories/DAO: single place to interact with the DB. Encapsulate raw SQL or ORM queries here.
-- DB Session management: prefer context-managed sessions injected per-request. For async: use async session with an async DB engine.
-- Migrations: use Alembic for schema migrations. Keep migration configs under db/migrations or migrations/.
-- Auth & Security: centralize JWT creation, verification, password hashing, token expiry handling. Protect sensitive endpoints with dependencies that verify tokens and scopes/roles.
-- Background Jobs: for short-lived background work, use FastAPI's BackgroundTasks; for heavy or long-running jobs, use Celery/RQ and a separate worker process.
+From models.py:
+
+- User (table: `user`)
+  - id (int, PK)
+  - email (str, unique)
+  - username (str, unique)
+  - firstname (str)
+  - lastname (str)
+  - hashed_password (str)
+  - is_active (bool)
+  - role (str) — e.g., `admin` or `user`
+
+- Todo (table: `todo`)
+  - id (int, PK)
+  - title (str)
+  - description (str)
+  - priority (str)
+  - check (bool)
+  - owner_id (int, FK -> user.id)
+
+The SQLite DB file `todo.db` is created automatically when the app first runs (SQLAlchemy create_all is used in the modules).
 
 ---
 
-## Running locally (example)
+## Endpoints (Level 2 package)
 
-1. Create a virtual env and install dependencies:
+Authentication (auth_api.py)
+- POST /auth/user-creation
+  - Create a new user.
+  - Request body JSON matching CreateUser model:
+    - email, username, firstname, lastname, hashed_password (plain password is hashed by code), is_active (bool), role
+  - Returns 201 on success.
+
+- POST /auth/token/user-validation
+  - Login endpoint using OAuth2 password form (application/x-www-form-urlencoded). Accepts `username` and `password` form fields.
+  - On success: sets an HTTP-only cookie named `token` and returns JSON {"token": "<JWT>"}.
+  - Token contains claims: sub (username), id (user id), role (user role), exp.
+
+User endpoints (users.py)
+- GET /user/get
+  - Returns current logged-in user details. Requires auth cookie.
+- GET /user/get-users
+  - Returns list of all users (no auth required in code; be careful about exposing user lists in production).
+- PUT /user/update/{new_password}/{old_password}
+  - Update current user's password (verifies old password, then sets new hashed password). Requires auth cookie.
+
+Todo endpoints (todo.py)
+- GET /todo/get/{todo_id}
+  - Returns todo items with the given id owned by current user. Requires auth cookie.
+- GET /todo/get/user/
+  - Returns todos for current user. Requires auth cookie.
+- POST /todo/post
+  - Create a todo for current user. Body JSON matches TodoRequest: title (str), description (str, optional), priority (str), check (bool).
+  - Requires auth cookie.
+- PUT /todo/update/{todo_id}
+  - Update a todo owned by current user. Body JSON same as TodoRequest. Requires auth cookie.
+- DELETE /todo/delete/{todo_id}
+  - Delete a todo owned by current user. Requires auth cookie.
+
+Admin endpoints (admin.py)
+- GET /admin/get
+  - Returns all todos. Requires auth cookie and role == "admin".
+- DELETE /admin/user/{todo_id}
+  - Delete a todo by id (admin-only). Requires auth cookie and role == "admin".
+
+---
+
+## How authentication works in this package
+
+- A JWT token is created in auth_api.create_access_token and signed with a hard-coded SECURITY_KEY in `auth_api.py`.
+- The login endpoint stores the JWT in an HTTP-only cookie named `token` and also returns the token in JSON.
+- The dependency `get_current_user` reads the cookie `token`, decodes the JWT, and returns a dict: {"user_name", "user_id", "user_role"}.
+- Routes call `Depends(get_current_user)` to receive the current user; if the cookie is absent or invalid, many handlers return a 401.
+
+Security notes: the key is hard-coded in the example code — for production use, move this to environment variables and secure secret storage.
+
+---
+
+## Run locally (concrete steps)
+
+1. Create and activate a virtualenv, then install dependencies. If `requirements.txt` is not present, install at least:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install fastapi uvicorn sqlalchemy pydantic passlib[bcrypt] python-jose
 ```
 
-2. Copy or set environment variables (example using `.env`):
-
-- DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/dbname
-- SECRET_KEY=your_secret_key
-- ACCESS_TOKEN_EXPIRE_MINUTES=60
-
-3. Run migrations (if Alembic is configured):
+2. Start the app from repository root:
 
 ```bash
-alembic upgrade head
+uvicorn main:app --reload
 ```
 
-4. Start the app:
+3. Open the interactive docs at:
+
+http://127.0.0.1:8000/docs
+
+4. The first run will create `todo.db` in the repository root (SQLite) because SQLAlchemy create_all is called.
+
+---
+
+## Example usage (curl)
+
+1) Create a user (store plain password in `hashed_password` field — the code hashes it again; in this example we pass a plain password string as `hashed_password`):
 
 ```bash
-uvicorn app.main:app --reload
+curl -X POST "http://127.0.0.1:8000/auth/user-creation" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"alice@example.com","username":"alice","firstname":"Alice","lastname":"Example","hashed_password":"mysecret","is_active":true,"role":"user"}'
 ```
 
-Open http://127.0.0.1:8000/docs for the interactive API docs.
-
----
-
-## Development & testing
-
-- Run unit tests:
+2) Login (obtain token and cookie):
 
 ```bash
-pytest -q
+curl -X POST "http://127.0.0.1:8000/auth/token/user-validation" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=alice&password=mysecret" \
+  -c cookies.txt
 ```
 
-- Lint and type-check:
+This stores the `token` cookie in `cookies.txt`. The response body also includes the token in JSON.
+
+3) Create a todo using the stored cookie:
 
 ```bash
-ruff .
-mypy app
+curl -X POST "http://127.0.0.1:8000/todo/post" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Buy milk","description":"2 liters","priority":"1","check":false}' \
+  -b cookies.txt
 ```
 
-- Use test containers or a local test DB to run integration tests against a real DB rather than mocking everything.
+4) Get current user details:
+
+```bash
+curl -X GET "http://127.0.0.1:8000/user/get" -b cookies.txt
+```
+
+5) Admin example (assumes a user with role `admin` exists and you logged in as that user):
+
+```bash
+curl -X GET "http://127.0.0.1:8000/admin/get" -b cookies.txt
+```
 
 ---
 
-## Deployment notes
+## Notes, limitations, and suggested improvements
 
-- Use an ASGI server like Uvicorn or Hypercorn behind a process manager (gunicorn-workers with uvicorn workers) for production.
-- Configure environment variables securely (secrets manager or CI secrets).
-- Use connection pooling and health checks. Tune pool sizes to your DB and workload.
-- Consider separate workers for background jobs (Celery) and a message broker like Redis or RabbitMQ.
-
----
-
-## Conventions & tips
-
-- Keep routers thin: move business logic into services.
-- Validate inputs strictly and return clear error responses using FastAPI's HTTPException and custom exception handlers.
-- Use Pydantic models for both validation and documentation.
-- Prefer dependency-injection over global singletons for resources that need cleanup.
-- Write integration tests for critical flows: auth, database transactions, and error handling.
+- Password handling: The `user-creation` endpoint expects a `hashed_password` field in the payload but the code hashes it again. In real apps, accept a `password` field and hash it on the server. Avoid storing plaintext anywhere.
+- Token storage: Cookies are used here for convenience, but consider CSRF protections, SameSite, secure flags, and proper session handling.
+- Secret management: Move SECURITY_KEY and other secrets to environment variables.
+- Authorization: Many endpoints check role by reading `user_role` claim — consider adding decorators or reusable dependency functions to centralize role checks.
+- Error handling: The code often returns HTTPException instances directly; prefer raising HTTPException for correct FastAPI behaviour.
+- Input validation: Some endpoints return raw ORM objects. Use Pydantic response models to avoid leaking internal fields.
+- Concurrency/DB sessions: The code uses a synchronous SQLAlchemy session with SQLite. For async workloads or production DBs, consider using async engines and proper pooling.
 
 ---
 
-## What to customize for this repo
+If you want, I can update the code to:
+- Add Pydantic request/response schemas and response_model on endpoints.
+- Replace the hard-coded SECURITY_KEY with BaseSettings (.env support).
+- Add tests for the authentication and todo flows.
 
-- Confirm whether the project uses async SQLAlchemy, Tortoise ORM, or a sync ORM — adapt the `db/session.py` and dependency functions accordingly.
-- Check for an existing `app/core/config.py` or `.env.example` to document the required environment variables for Level 2.
-- If Celery is included, add a `tasks/README.md` explaining worker startup and broker configuration.
-
----
-
-If you want, I can tailor this README to the exact files and code in Level_2_Intermediate_Advance_FastAPI (list endpoints, show exact run commands, and link to specific files) — tell me if you'd like me to inspect the directory and make the README more specific.
+Tell me which change you'd like next and I'll make the changes and open a new commit for you.
